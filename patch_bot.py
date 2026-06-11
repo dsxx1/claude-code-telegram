@@ -716,6 +716,21 @@ if __name__ == "__main__":
     mcp.run(transport="stdio")''',
     ),
     (
+        "STRICT strict_mcp_config — грузить только наш MCP-сервер",
+        SDKINT,
+        "strict_mcp_config=",
+        r'''            # Build Claude Agent options
+            options = ClaudeAgentOptions(
+                max_turns=self.config.claude_max_turns,''',
+        r'''            # Build Claude Agent options
+            options = ClaudeAgentOptions(
+                # ТОЛЬКО наш telegram-MCP: игнорируем глобальные серверы из
+                # ~/.claude.json (patapim-browser и т.п.), которые висли на
+                # initialize → "Control request timeout".
+                strict_mcp_config=bool(self.config.enable_mcp),
+                max_turns=self.config.claude_max_turns,''',
+    ),
+    (
         "SENDFILE инструкция в системный промпт",
         SDKINT,
         "ВЫГРУЗКА ФАЙЛОВ ПОЛЬЗОВАТЕЛЮ",

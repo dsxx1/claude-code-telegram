@@ -332,6 +332,10 @@ class ClaudeSDKManager:
 
             # Build Claude Agent options
             options = ClaudeAgentOptions(
+                # ТОЛЬКО наш telegram-MCP: игнорируем глобальные серверы из
+                # ~/.claude.json (patapim-browser и т.п.), которые висли на
+                # initialize → "Control request timeout".
+                strict_mcp_config=bool(self.config.enable_mcp),
                 max_turns=self.config.claude_max_turns,
                 model=self.config.claude_model or None,
                 max_budget_usd=self.config.claude_max_cost_per_request,
