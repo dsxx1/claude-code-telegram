@@ -294,7 +294,7 @@ class VoiceHandler:
                 str(wav_path),
                 "--no-timestamps",
                 "-l",
-                "auto",
+                "ru",
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )

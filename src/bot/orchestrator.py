@@ -417,6 +417,9 @@ class MessageOrchestrator:
             ("actions", command.quick_actions),
             ("git", command.git_command),
             ("restart", command.restart_command),
+            ("model", command.model_command),
+            ("sessions", command.sessions_command),
+            ("resume", command.resume_command),
         ]
         if self.settings.enable_project_threads:
             handlers.append(("sync_threads", command.sync_threads))
@@ -467,20 +470,23 @@ class MessageOrchestrator:
             return commands
         else:
             commands = [
-                BotCommand("start", "Start bot and show help"),
-                BotCommand("help", "Show available commands"),
-                BotCommand("new", "Clear context and start fresh session"),
-                BotCommand("continue", "Explicitly continue last session"),
-                BotCommand("end", "End current session and clear context"),
-                BotCommand("ls", "List files in current directory"),
-                BotCommand("cd", "Change directory (resumes project session)"),
-                BotCommand("pwd", "Show current directory"),
-                BotCommand("projects", "Show all projects"),
-                BotCommand("status", "Show session status"),
-                BotCommand("export", "Export current session"),
-                BotCommand("actions", "Show quick actions"),
-                BotCommand("git", "Git repository commands"),
-                BotCommand("restart", "Restart the bot"),
+                BotCommand("start", "Запустить бота и показать справку"),
+                BotCommand("help", "Справка по всем командам"),
+                BotCommand("new", "Новый диалог (очистить контекст)"),
+                BotCommand("continue", "Продолжить прошлый диалог"),
+                BotCommand("end", "Завершить диалог и очистить контекст"),
+                BotCommand("ls", "Файлы в текущей папке"),
+                BotCommand("cd", "Сменить папку: cd <путь>"),
+                BotCommand("pwd", "Показать текущую папку"),
+                BotCommand("projects", "Список проектов"),
+                BotCommand("status", "Статус сессии и расход"),
+                BotCommand("export", "Выгрузить текущий диалог"),
+                BotCommand("actions", "Быстрые действия"),
+                BotCommand("git", "Команды git-репозитория"),
+                BotCommand("model", "Выбрать модель Claude"),
+                BotCommand("sessions", "Список последних сессий"),
+                BotCommand("resume", "Продолжить сессию по UUID"),
+                BotCommand("restart", "Перезапустить бота"),
             ]
             if self.settings.enable_project_threads:
                 commands.append(BotCommand("sync_threads", "Sync project topics"))

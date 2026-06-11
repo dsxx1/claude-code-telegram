@@ -43,5 +43,35 @@ async def send_image_to_user(file_path: str, caption: str = "") -> str:
     return f"Image queued for delivery: {path.name}"
 
 
+@mcp.tool()
+async def send_file_to_user(file_path: str, caption: str = "") -> str:
+    """Send any file (md, txt, csv, xlsx, docx, pdf, ...) to the Telegram user as a document.
+
+    Use this whenever the user asks to export, download or receive content as
+    a file (e.g. "выгрузи в md", "пришли файлом", "сохрани в txt и отправь").
+    First write the file to disk (UTF-8 for text formats), then call this
+    tool with the absolute path.
+
+    Args:
+        file_path: Absolute path to the file.
+        caption: Optional caption.
+
+    Returns:
+        Confirmation string when the file is queued for delivery.
+    """
+    path = Path(file_path)
+
+    if not path.is_absolute():
+        return f"Error: path must be absolute, got '{file_path}'"
+
+    if not path.is_file():
+        return f"Error: file not found: {file_path}"
+
+    if path.stat().st_size > 50 * 1024 * 1024:
+        return "Error: file exceeds the 50 MB Telegram limit"
+
+    return f"File queued for delivery: {path.name}"
+
+
 if __name__ == "__main__":
     mcp.run(transport="stdio")

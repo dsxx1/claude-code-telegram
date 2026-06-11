@@ -112,23 +112,23 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             )
 
     welcome_message = (
-        f"👋 Welcome to Claude Code Telegram Bot, {escape_html(user.first_name)}!\n\n"
-        f"🤖 I help you access Claude Code remotely through Telegram.\n\n"
-        f"<b>Available Commands:</b>\n"
-        f"• <code>/help</code> - Show detailed help\n"
-        f"• <code>/new</code> - Start a new Claude session\n"
-        f"• <code>/ls</code> - List files in current directory\n"
-        f"• <code>/cd &lt;dir&gt;</code> - Change directory\n"
-        f"• <code>/projects</code> - Show available projects\n"
-        f"• <code>/status</code> - Show session status\n"
-        f"• <code>/actions</code> - Show quick actions\n"
-        f"• <code>/git</code> - Git repository commands\n\n"
-        f"<b>Quick Start:</b>\n"
-        f"1. Use <code>/projects</code> to see available projects\n"
-        f"2. Use <code>/cd &lt;project&gt;</code> to navigate to a project\n"
-        f"3. Send any message to start coding with Claude!\n\n"
-        f"🔒 Your access is secured and all actions are logged.\n"
-        f"📊 Use <code>/status</code> to check your usage limits."
+        f"👋 Привет, {escape_html(user.first_name)}! Это Claude Code в Telegram.\n\n"
+        f"🤖 Я даю удалённый доступ к Claude Code прямо из чата.\n\n"
+        f"<b>Основные команды:</b>\n"
+        f"• <code>/help</code> - Подробная справка\n"
+        f"• <code>/new</code> - Новый диалог с Claude\n"
+        f"• <code>/ls</code> - Файлы в текущей папке\n"
+        f"• <code>/cd &lt;папка&gt;</code> - Сменить папку\n"
+        f"• <code>/projects</code> - Список проектов\n"
+        f"• <code>/status</code> - Статус сессии\n"
+        f"• <code>/actions</code> - Быстрые действия\n"
+        f"• <code>/git</code> - Команды git\n\n"
+        f"<b>Быстрый старт:</b>\n"
+        f"1. <code>/projects</code> - посмотреть проекты\n"
+        f"2. <code>/cd &lt;проект&gt;</code> - перейти в проект\n"
+        f"3. Напиши любое сообщение - и Claude возьмётся за дело!\n\n"
+        f"🔒 Доступ защищён, все действия логируются.\n"
+        f"📊 <code>/status</code> - проверить лимиты."
         f"{sync_section}"
     )
 
@@ -136,13 +136,13 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     keyboard = [
         [
             InlineKeyboardButton(
-                "📁 Show Projects", callback_data="action:show_projects"
+                "📁 Проекты", callback_data="action:show_projects"
             ),
-            InlineKeyboardButton("❓ Get Help", callback_data="action:help"),
+            InlineKeyboardButton("❓ Справка", callback_data="action:help"),
         ],
         [
-            InlineKeyboardButton("🆕 New Session", callback_data="action:new_session"),
-            InlineKeyboardButton("📊 Check Status", callback_data="action:status"),
+            InlineKeyboardButton("🆕 Новый диалог", callback_data="action:new_session"),
+            InlineKeyboardButton("📊 Статус", callback_data="action:status"),
         ],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -161,48 +161,185 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle /help command."""
     help_text = (
-        "🤖 <b>Claude Code Telegram Bot Help</b>\n\n"
-        "<b>Navigation Commands:</b>\n"
-        "• <code>/ls</code> - List files and directories\n"
-        "• <code>/cd &lt;directory&gt;</code> - Change to directory\n"
-        "• <code>/pwd</code> - Show current directory\n"
-        "• <code>/projects</code> - Show available projects\n\n"
-        "<b>Session Commands:</b>\n"
-        "• <code>/new</code> - Clear context and start a fresh session\n"
-        "• <code>/continue [message]</code> - Explicitly continue last session\n"
-        "• <code>/end</code> - End current session and clear context\n"
-        "• <code>/status</code> - Show session and usage status\n"
-        "• <code>/export</code> - Export session history\n"
-        "• <code>/actions</code> - Show context-aware quick actions\n"
-        "• <code>/git</code> - Git repository information\n\n"
-        "<b>Session Behavior:</b>\n"
-        "• Sessions are automatically maintained per project directory\n"
-        "• Switching directories with <code>/cd</code> resumes the session for that project\n"
-        "• Use <code>/new</code> or <code>/end</code> to explicitly clear session context\n"
-        "• Sessions persist across bot restarts\n\n"
-        "<b>Usage Examples:</b>\n"
-        "• <code>cd myproject</code> - Enter project directory\n"
-        "• <code>ls</code> - See what's in current directory\n"
-        "• <code>Create a simple Python script</code> - Ask Claude to code\n"
-        "• Send a file to have Claude review it\n\n"
-        "<b>File Operations:</b>\n"
-        "• Send text files (.py, .js, .md, etc.) for review\n"
-        "• Claude can read, modify, and create files\n"
-        "• All file operations are within your approved directory\n\n"
-        "<b>Security Features:</b>\n"
-        "• 🔒 Path traversal protection\n"
-        "• ⏱️ Rate limiting to prevent abuse\n"
-        "• 📊 Usage tracking and limits\n"
-        "• 🛡️ Input validation and sanitization\n\n"
-        "<b>Tips:</b>\n"
-        "• Use specific, clear requests for best results\n"
-        "• Check <code>/status</code> to monitor your usage\n"
-        "• Use quick action buttons when available\n"
-        "• File uploads are automatically processed by Claude\n\n"
-        "Need more help? Contact your administrator."
+        "🤖 <b>Справка по Claude Code Telegram Bot</b>\n\n"
+        "<b>Навигация:</b>\n"
+        "• <code>/ls</code> - Файлы и папки\n"
+        "• <code>/cd &lt;папка&gt;</code> - Перейти в папку\n"
+        "• <code>/pwd</code> - Текущая папка\n"
+        "• <code>/projects</code> - Список проектов\n\n"
+        "<b>Сессии:</b>\n"
+        "• <code>/new</code> - Новый диалог (очистить контекст)\n"
+        "• <code>/continue [сообщение]</code> - Продолжить прошлый диалог\n"
+        "• <code>/end</code> - Завершить диалог и очистить контекст\n"
+        "• <code>/status</code> - Статус сессии и расход\n"
+        "• <code>/export</code> - Выгрузить историю диалога\n"
+        "• <code>/actions</code> - Быстрые действия\n"
+        "• <code>/git</code> - Информация о git-репозитории\n\n"
+        "<b>Как работают сессии:</b>\n"
+        "• На каждую папку проекта - своя сессия, она ведётся автоматически\n"
+        "• <code>/cd</code> в папку проекта продолжает его сессию\n"
+        "• <code>/new</code> или <code>/end</code> - явно очистить контекст\n"
+        "• Сессии переживают перезапуск бота\n\n"
+        "<b>Примеры:</b>\n"
+        "• <code>cd myproject</code> - зайти в папку проекта\n"
+        "• <code>ls</code> - что лежит в текущей папке\n"
+        "• <code>Напиши скрипт на Python</code> - задача для Claude\n"
+        "• Пришли файл - Claude его разберёт\n\n"
+        "<b>Файлы:</b>\n"
+        "• Присылай текстовые файлы (.py, .xlsx, .md и т.п.) на разбор\n"
+        "• Claude умеет читать, менять и создавать файлы\n"
+        "• Все операции - только внутри разрешённой папки\n\n"
+        "<b>Безопасность:</b>\n"
+        "• 🔒 Защита от выхода за пределы папки\n"
+        "• ⏱️ Ограничение частоты запросов\n"
+        "• 📊 Учёт и лимиты использования\n"
+        "• 🛡️ Проверка и очистка ввода\n\n"
+        "<b>Советы:</b>\n"
+        "• Формулируй задачу конкретно - результат будет лучше\n"
+        "• <code>/status</code> - следить за расходом\n"
+        "• Пользуйся кнопками быстрых действий\n"
+        "• Голосовые тоже понимаю - просто наговори задачу"
     )
 
     await update.message.reply_text(help_text, parse_mode="HTML")
+
+
+_MODEL_ALIASES = {
+    "sonnet": "sonnet",
+    "opus": "claude-opus-4-8",
+    "fable": "claude-fable-5",
+    "haiku": "haiku",
+}
+
+
+async def model_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Сменить модель Claude на лету: /model [sonnet|opus|fable|haiku|<id>]."""
+    settings: Settings = context.bot_data["settings"]
+    args = context.args or []
+    current = settings.claude_model or "(по умолчанию CLI)"
+    if not args:
+        await update.message.reply_text(
+            "🧠 <b>Текущая модель:</b> <code>"
+            + escape_html(str(current))
+            + "</code>\n\n"
+            "Сменить: <code>/model sonnet</code> · <code>/model opus</code> · "
+            "<code>/model fable</code> · <code>/model haiku</code>\n"
+            "Или точный ID: <code>/model claude-fable-5</code>\n\n"
+            "⚠️ Действует до перезапуска бота (постоянная настройка - в .env).",
+            parse_mode="HTML",
+        )
+        return
+    choice = args[0].strip().lower()
+    new_model = _MODEL_ALIASES.get(choice, args[0].strip())
+    settings.claude_model = new_model
+    await update.message.reply_text(
+        "🧠 Модель переключена: <code>"
+        + escape_html(new_model)
+        + "</code>\nПодействует со следующего сообщения.",
+        parse_mode="HTML",
+    )
+
+
+async def sessions_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Показать последние сессии Claude Code с описанием первого сообщения."""
+    import json as _json
+    from pathlib import Path as _Path
+    from datetime import datetime as _dt
+
+    projects_dir = _Path.home() / ".claude" / "projects"
+
+    # Имена папок: ~/claude-tg/sessions-names.json
+    # ({"<slug>": "имя", "<slug>": null} — null скрывает папку).
+    _labels = {}
+    _names_file = _Path.home() / "claude-tg" / "sessions-names.json"
+    try:
+        _labels = _json.loads(_names_file.read_text(encoding="utf-8"))
+    except Exception:
+        pass
+
+    if not projects_dir.exists():
+        await update.message.reply_text("❌ Папка сессий не найдена.")
+        return
+
+    sessions = []
+    for proj_dir in projects_dir.iterdir():
+        if not proj_dir.is_dir():
+            continue
+        label = _labels.get(proj_dir.name, proj_dir.name[:18])
+        if label is None:
+            continue   # пропускаем шумные папки
+        for jsonl in proj_dir.glob("*.jsonl"):
+            mtime = jsonl.stat().st_mtime
+            sessions.append((mtime, jsonl, label))
+
+    sessions.sort(key=lambda x: x[0], reverse=True)
+    sessions = sessions[:12]
+
+    if not sessions:
+        await update.message.reply_text("Сессий не найдено.")
+        return
+
+    lines = ["📋 <b>Последние сессии Claude Code:</b>\n"]
+    for i, (mtime, path, label) in enumerate(sessions, 1):
+        dt_str = _dt.fromtimestamp(mtime).strftime("%d.%m %H:%M")
+        uuid = path.stem
+        first_msg = ""
+        try:
+            with open(path, encoding="utf-8") as f:
+                for line in f:
+                    try:
+                        entry = _json.loads(line)
+                        if (
+                            entry.get("type") == "queue-operation"
+                            and entry.get("operation") == "enqueue"
+                            and entry.get("content")
+                        ):
+                            first_msg = entry["content"].replace("\n", " ")[:65]
+                            break
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+        lines.append(
+            f"{i}. [{dt_str}] <b>{label}</b>\n"
+            f"   {first_msg or '(нет текста)'}\n"
+            f"   <code>{uuid}</code>"
+        )
+
+    lines.append("\n▶️ Возобновить: <code>/resume &lt;UUID&gt;</code>")
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+
+async def resume_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Возобновить сессию по UUID: /resume <uuid>
+    Просто записывает UUID в user_data["claude_session_id"] —
+    следующее сообщение автоматически продолжит эту сессию."""
+    args = context.args or []
+    if not args:
+        current = context.user_data.get("claude_session_id", "(не задана)")
+        await update.message.reply_text(
+            "▶️ <b>Возобновление сессии</b>\n\n"
+            f"Текущая: <code>{current}</code>\n\n"
+            "Укажи UUID: <code>/resume &lt;UUID&gt;</code>\n"
+            "Список сессий: /sessions",
+            parse_mode="HTML",
+        )
+        return
+    uuid = args[0].strip()
+    # Проверка формата UUID (8-4-4-4-12)
+    import re as _re
+    if not _re.match(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", uuid, _re.I):
+        await update.message.reply_text(
+            "❌ Неверный формат UUID.\nОжидается: <code>xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx</code>",
+            parse_mode="HTML",
+        )
+        return
+    context.user_data["claude_session_id"] = uuid
+    await update.message.reply_text(
+        f"✅ Сессия установлена:\n<code>{uuid}</code>\n\n"
+        "Следующее сообщение продолжит этот диалог.",
+        parse_mode="HTML",
+    )
 
 
 async def sync_threads(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

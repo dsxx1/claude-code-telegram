@@ -59,6 +59,13 @@ class ImageHandler:
 
         base64_image = base64.b64encode(image_bytes).decode("utf-8")
 
+        import time as _t
+        _dir = self.config.approved_directory / "_tg_images"
+        _dir.mkdir(parents=True, exist_ok=True)
+        _ip = _dir / ("img_" + str(int(_t.time() * 1000)) + ".jpg")
+        _ip.write_bytes(bytes(image_bytes))
+        prompt = prompt + "\n\nAn image was saved at: " + str(_ip) + ". Use the Read tool to open that file and respond about the image (describe / analyze / help). Answer any question written in the caption."
+
         return ProcessedImage(
             prompt=prompt,
             image_type=image_type,

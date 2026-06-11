@@ -59,6 +59,11 @@ def load_config(
         # Apply environment-specific overrides
         settings = _apply_environment_overrides(settings, env)
 
+        # Токен уже считан в Settings. Убираем его из окружения, чтобы
+        # дочерние claude-процессы (и Telegram-плагин Claude Code в них)
+        # не начали поллить этот же токен -> 409 Conflict.
+        os.environ.pop("TELEGRAM_BOT_TOKEN", None)
+
         # Validate configuration
         _validate_config(settings)
 

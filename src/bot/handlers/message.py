@@ -376,6 +376,34 @@ async def handle_text_message(
                         )
                         if img:
                             mcp_images.append(img)
+                    elif tc_name == "send_file_to_user" or tc_name.endswith(
+                        "__send_file_to_user"
+                    ):
+                        from pathlib import Path as _Path
+
+                        tc_input = tc.get("input", {})
+                        _fp = tc_input.get("file_path", "")
+                        try:
+                            _p = _Path(_fp).resolve()
+                            # только внутри разрешённой папки бота
+                            _p.relative_to(
+                                settings.approved_directory.resolve()
+                            )
+                            if (
+                                _p.is_file()
+                                and _p.stat().st_size <= 50 * 1024 * 1024
+                            ):
+                                mcp_images.append(
+                                    ImageAttachment(
+                                        path=_p,
+                                        mime_type="application/octet-stream",
+                                        original_reference=_fp,
+                                    )
+                                )
+                        except Exception:
+                            logger.warning(
+                                "send_file_to_user: rejected path", path=_fp
+                            )
 
             try:
                 progress_text = await _format_progress_update(update_obj)
@@ -385,6 +413,7 @@ async def handle_text_message(
                 logger.warning("Failed to update progress message", error=str(e))
 
         # Run Claude command
+        claude_response = None
         try:
             claude_response = await claude_integration.run_command(
                 prompt=message_text,
@@ -790,8 +819,10 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         await progress_msg.delete()
 
         # Create a new progress message for Claude processing
+        import time as _time
+        _t0 = _time.perf_counter()
         claude_progress_msg = await update.message.reply_text(
-            "🤖 Processing file with Claude...", parse_mode="HTML"
+            "🤖 Разбираю файл в Claude…", parse_mode="HTML"
         )
 
         # Get Claude integration from context
@@ -812,12 +843,23 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         session_id = context.user_data.get("claude_session_id")
 
         # Process with Claude
+        async def _doc_stream(update_obj):
+            try:
+                progress_text = await _format_progress_update(update_obj)
+                if progress_text:
+                    await claude_progress_msg.edit_text(
+                        progress_text, parse_mode="HTML"
+                    )
+            except Exception as e:
+                logger.warning("Failed to update progress message", error=str(e))
+
         try:
             claude_response = await claude_integration.run_command(
                 prompt=prompt,
                 working_directory=current_dir,
                 user_id=user_id,
                 session_id=session_id,
+                on_stream=_doc_stream,
             )
 
             # Update session ID
@@ -837,7 +879,11 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             )
 
             # Delete progress message
-            await claude_progress_msg.delete()
+            _t_total = _time.perf_counter() - _t0
+            await claude_progress_msg.edit_text(
+                f"⏱ Файл обработан за {_t_total:.1f}с",
+                parse_mode="HTML",
+            )
 
             # Send responses
             for i, message in enumerate(formatted_messages):
@@ -1038,8 +1084,10 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         return
 
     try:
+        import time as _time
+        _t0 = _time.perf_counter()
         progress_msg = await update.message.reply_text(
-            "🎙️ Transcribing voice message...", parse_mode="HTML"
+            "🎙️ Распознаю голосовое…", parse_mode="HTML"
         )
 
         voice = update.message.voice
@@ -1047,9 +1095,12 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             voice, update.message.caption
         )
 
+        _t_voice = _time.perf_counter() - _t0
         await progress_msg.edit_text(
-            "🤖 Processing transcription with Claude...", parse_mode="HTML"
+            f"🎙️ Распознано за {_t_voice:.1f}с\n🤖 Обрабатываю в Claude…",
+            parse_mode="HTML",
         )
+        _t1 = _time.perf_counter()
 
         claude_integration = context.bot_data.get("claude_integration")
         if not claude_integration:
@@ -1088,7 +1139,12 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
                 claude_response.content
             )
 
-            await progress_msg.delete()
+            _t_claude = _time.perf_counter() - _t1
+            _t_total = _time.perf_counter() - _t0
+            await progress_msg.edit_text(
+                f"⏱ Распознавание: {_t_voice:.1f}с · Claude: {_t_claude:.1f}с · всего: {_t_total:.1f}с",
+                parse_mode="HTML",
+            )
 
             for i, message in enumerate(formatted_messages):
                 await update.message.reply_text(
