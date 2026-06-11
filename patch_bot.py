@@ -46,6 +46,7 @@ LOADER = ROOT / "src" / "config" / "loader.py"
 CMD = ROOT / "src" / "bot" / "handlers" / "command.py"
 AUTHMW = ROOT / "src" / "bot" / "middleware" / "auth.py"
 MCPSRV = ROOT / "src" / "mcp" / "telegram_server.py"
+SDKINT = ROOT / "src" / "claude" / "sdk_integration.py"
 
 # (имя, файл, маркер-уже-применён, найти, заменить)
 PATCHES = [
@@ -715,6 +716,31 @@ if __name__ == "__main__":
     mcp.run(transport="stdio")''',
     ),
     (
+        "SENDFILE инструкция в системный промпт",
+        SDKINT,
+        "ВЫГРУЗКА ФАЙЛОВ ПОЛЬЗОВАТЕЛЮ",
+        r'''            base_prompt = (
+                f"All file operations must stay within {working_directory}. "
+                "Use relative paths."
+            )''',
+        r'''            base_prompt = (
+                f"All file operations must stay within {working_directory}. "
+                "Use relative paths."
+                "\n\n## ВЫГРУЗКА ФАЙЛОВ ПОЛЬЗОВАТЕЛЮ (Telegram)\n"
+                "Ты работаешь как Telegram-бот. Когда пользователь просит "
+                "ПРИСЛАТЬ, ВЫГРУЗИТЬ, СКАЧАТЬ или ОТПРАВИТЬ что-либо ФАЙЛОМ "
+                "(например: «пришли файлом», «выгрузи в md», «сохрани в txt и "
+                "отправь», «скинь файл», «дай excel/csv»), ты ОБЯЗАН:\n"
+                "1) сохранить содержимое в файл по АБСОЛЮТНОМУ пути внутри "
+                f"{working_directory} инструментом Write (текст — в UTF-8);\n"
+                "2) вызвать инструмент send_file_to_user с этим абсолютным "
+                "путём (file_path) и кратким caption.\n"
+                "НИКОГДА не вставляй содержимое файла код-блоком в чат вместо "
+                "реальной отправки — пользователю нужен сам файл-вложение. "
+                "Для картинок используй send_image_to_user."
+            )'''
+    ),
+    (
         "OUT-2 перехват send_file_to_user в message.py",
         MSG,
         "__send_file_to_user",
@@ -814,7 +840,7 @@ def main() -> int:
         print(f"[!] {name}: якорь не найден ни в одном проходе — НЕ применён. Скажи Claude.")
         failed += 1
 
-    for f in (MSG, IMG, ORCH, LOADER, CMD, AUTHMW, MCPSRV):
+    for f in (MSG, IMG, ORCH, LOADER, CMD, AUTHMW, MCPSRV, SDKINT):
         if f.exists():
             try:
                 py_compile.compile(str(f), doraise=True)

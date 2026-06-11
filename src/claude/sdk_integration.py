@@ -300,6 +300,18 @@ class ClaudeSDKManager:
             base_prompt = (
                 f"All file operations must stay within {working_directory}. "
                 "Use relative paths."
+                "\n\n## ВЫГРУЗКА ФАЙЛОВ ПОЛЬЗОВАТЕЛЮ (Telegram)\n"
+                "Ты работаешь как Telegram-бот. Когда пользователь просит "
+                "ПРИСЛАТЬ, ВЫГРУЗИТЬ, СКАЧАТЬ или ОТПРАВИТЬ что-либо ФАЙЛОМ "
+                "(например: «пришли файлом», «выгрузи в md», «сохрани в txt и "
+                "отправь», «скинь файл», «дай excel/csv»), ты ОБЯЗАН:\n"
+                "1) сохранить содержимое в файл по АБСОЛЮТНОМУ пути внутри "
+                f"{working_directory} инструментом Write (текст — в UTF-8);\n"
+                "2) вызвать инструмент send_file_to_user с этим абсолютным "
+                "путём (file_path) и кратким caption.\n"
+                "НИКОГДА не вставляй содержимое файла код-блоком в чат вместо "
+                "реальной отправки — пользователю нужен сам файл-вложение. "
+                "Для картинок используй send_image_to_user."
             )
             claude_md_path = Path(working_directory) / "CLAUDE.md"
             if claude_md_path.exists():
