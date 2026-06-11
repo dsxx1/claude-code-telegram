@@ -1,8 +1,9 @@
 {
+  "_comment": "Copy to mcp.json and replace the absolute path with the real path to this repo. The SDK launches MCP servers with cwd = APPROVED_DIRECTORY (not the project root), so relative script paths will not resolve. Use absolute paths.",
   "mcpServers": {
     "telegram": {
       "command": "python",
-      "args": ["src/mcp/telegram_server.py"]
+      "args": ["C:\\path\\to\\claude-code-telegram\\src\\mcp\\telegram_server.py"]
     }
   }
 }
