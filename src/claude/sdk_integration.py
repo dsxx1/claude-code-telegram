@@ -769,13 +769,50 @@ class ClaudeSDKManager:
         """Load MCP server configuration from a JSON file.
 
         The new claude-agent-sdk expects mcp_servers as a dict, not a file path.
+
+        Relative paths in ``args`` and (when it contains separators) ``command``
+        are resolved against the directory of the config file. This makes the
+        config robust regardless of which cwd the SDK uses to spawn the MCP
+        server (typically the user's working directory, not the project root).
         """
         import json
 
         try:
-            with open(config_path) as f:
+            cfg_path = Path(config_path).resolve()
+            with open(cfg_path) as f:
                 config_data = json.load(f)
-            return config_data.get("mcpServers", {})
+            servers = config_data.get("mcpServers", {}) or {}
+
+            base_dir = cfg_path.parent
+            script_suffixes = {".py", ".js", ".mjs", ".cjs", ".ts", ".sh", ".bat", ".cmd", ".ps1"}
+
+            def _resolve(p: str) -> str:
+                if not p:
+                    return p
+                pp = Path(p)
+                if pp.is_absolute():
+                    return str(pp)
+                return str((base_dir / pp).resolve())
+
+            for name, server in servers.items():
+                if not isinstance(server, dict):
+                    continue
+                # Resolve script paths in args
+                args = server.get("args")
+                if isinstance(args, list):
+                    new_args: List[Any] = []
+                    for a in args:
+                        if isinstance(a, str) and Path(a).suffix.lower() in script_suffixes:
+                            new_args.append(_resolve(a))
+                        else:
+                            new_args.append(a)
+                    server["args"] = new_args
+                # Resolve command if it's a path (contains separators), not a bare name
+                cmd = server.get("command")
+                if isinstance(cmd, str) and ("/" in cmd or "\\" in cmd):
+                    server["command"] = _resolve(cmd)
+
+            return servers
         except (json.JSONDecodeError, OSError) as e:
             logger.error(
                 "Failed to load MCP config", path=str(config_path), error=str(e)

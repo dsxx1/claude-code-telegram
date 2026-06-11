@@ -757,7 +757,7 @@ class MessageOrchestrator:
             if interrupt_event is not None and interrupt_event.is_set():
                 return
 
-            # Intercept send_image_to_user MCP tool calls.
+            # Intercept send_image_to_user / send_file_to_user MCP tool calls.
             # The SDK namespaces MCP tools as "mcp__<server>__<tool>",
             # so match both the bare name and the namespaced variant.
             if update_obj.tool_calls and need_mcp_intercept:
@@ -774,6 +774,31 @@ class MessageOrchestrator:
                         )
                         if img:
                             mcp_images.append(img)
+                    elif tc_name == "send_file_to_user" or tc_name.endswith(
+                        "__send_file_to_user"
+                    ):
+                        from pathlib import Path as _Path
+
+                        tc_input = tc.get("input", {})
+                        _fp = tc_input.get("file_path", "")
+                        try:
+                            _p = _Path(_fp).resolve()
+                            _p.relative_to(approved_directory.resolve())
+                            if (
+                                _p.is_file()
+                                and _p.stat().st_size <= 50 * 1024 * 1024
+                            ):
+                                mcp_images.append(
+                                    ImageAttachment(
+                                        path=_p,
+                                        mime_type="application/octet-stream",
+                                        original_reference=_fp,
+                                    )
+                                )
+                        except Exception:
+                            logger.warning(
+                                "send_file_to_user: rejected path", path=_fp
+                            )
 
             # Capture tool calls
             if update_obj.tool_calls:
