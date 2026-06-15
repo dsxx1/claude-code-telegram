@@ -10,6 +10,7 @@ Features:
 
 import shutil
 import tarfile
+import tempfile
 import uuid
 import zipfile
 from collections import defaultdict
@@ -50,8 +51,8 @@ class FileHandler:
     def __init__(self, config: Settings, security: SecurityValidator):
         self.config = config
         self.security = security
-        self.temp_dir = Path("/tmp/claude_bot_files")
-        self.temp_dir.mkdir(exist_ok=True)
+        self.temp_dir = Path(tempfile.gettempdir()) / "claude_bot_files"
+        self.temp_dir.mkdir(parents=True, exist_ok=True)
 
         # Supported code extensions
         self.code_extensions = {
@@ -149,6 +150,31 @@ class FileHandler:
                 return await self._process_code_file(file_path, context)
             elif file_type == "text":
                 return await self._process_text_file(file_path, context)
+            elif file_type == "pdf":
+                hint = (
+                    "Открой файл через Read tool (поддерживает PDF). "
+                    "Если PDF большой (>10 страниц) — обязательно укажи "
+                    "параметр `pages` (например `pages: \"1-5\"`)."
+                )
+                return await self._process_binary_passthrough(
+                    file_path, context, hint
+                )
+            elif file_type == "office":
+                hint = (
+                    "Это офисный документ (docx/xlsx/pptx и т.п.). Read tool такие "
+                    "не открывает напрямую — используй Bash/PowerShell + Python "
+                    "(`docx2txt`, `openpyxl`, `python-pptx`) либо `pandoc`, чтобы "
+                    "извлечь текст. Если библиотек нет — установи через pip и "
+                    "продолжай."
+                )
+                return await self._process_binary_passthrough(
+                    file_path, context, hint
+                )
+            elif file_type == "image":
+                # Картинка, отправленная как файл (не сжатое Photo). Сохраняем
+                # в _tg_images (тот же путь, что фото-хендлер) и формируем
+                # стандартный image-prompt, чтобы Claude открыл её через Read.
+                return await self._process_image_document(file_path, context)
             else:
                 raise ValueError(f"Unsupported file type: {file_type}")
 
@@ -178,6 +204,22 @@ class FileHandler:
         if ext in {".zip", ".tar", ".gz", ".bz2", ".xz", ".7z"}:
             return "archive"
 
+        # PDF — у Claude Read tool есть нативная поддержка PDF.
+        # Сохраняем файл в approved-директорию и просим Claude открыть через Read.
+        if ext == ".pdf":
+            return "pdf"
+
+        # Картинка, отправленная как файл/документ (а не как сжатое Photo).
+        # Read tool у Claude поддерживает чтение PNG/JPG нативно (мультимодал).
+        if ext in {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp"}:
+            return "image"
+
+        # Офисные форматы — Claude нативно не читает, но может конвертировать
+        # через Python (docx2txt / openpyxl). Сохраняем и подсказываем путь.
+        if ext in {".docx", ".doc", ".xlsx", ".xls", ".pptx", ".ppt", ".rtf",
+                   ".odt", ".ods", ".odp"}:
+            return "office"
+
         # Check if code
         if ext in self.code_extensions:
             return "code"
@@ -189,6 +231,77 @@ class FileHandler:
             return "text"
         except (UnicodeDecodeError, IOError):
             return "binary"
+
+    async def _process_image_document(
+        self, file_path: Path, context: str
+    ) -> "ProcessedFile":
+        """Картинка, отправленная как файл (Document, не сжатый Photo).
+        Сохраняем в approved_directory/_tg_images/img_<ts>.<ext> — тот же путь,
+        что использует image_handler для сжатых фото. Промпт строим в
+        стандартном формате «сохранил по пути X, открой через Read tool»,
+        чтобы Claude обработал картинку нативной мультимодальной поддержкой."""
+        import shutil as _sh
+        import time as _t
+
+        target_dir = Path(self.config.approved_directory) / "_tg_images"
+        target_dir.mkdir(parents=True, exist_ok=True)
+        ext = file_path.suffix.lower() or ".jpg"
+        target = target_dir / f"img_{int(_t.time() * 1000)}{ext}"
+        _sh.copy2(file_path, target)
+
+        prompt = (
+            "I'm sharing an image with you (sent as document/file, not "
+            "compressed photo). Please analyze it and help me with:\n\n"
+            "1. Identifying what application or website this is from\n"
+            "2. Understanding the UI elements and their purpose\n"
+            "3. Any issues or improvements you notice\n"
+            "4. Answering any specific questions I have\n\n"
+        )
+        if context:
+            prompt += f"Specific request: {context}\n\n"
+        prompt += (
+            f"An image was saved at: {target}. Use the Read tool to open "
+            "that file and respond about the image (describe / analyze / "
+            "help). Answer any question written in the caption."
+        )
+        return ProcessedFile(
+            type="image",
+            prompt=prompt,
+            metadata={
+                "file_name": file_path.name,
+                "saved_path": str(target),
+                "size": file_path.stat().st_size,
+            },
+        )
+
+    async def _process_binary_passthrough(
+        self, file_path: Path, context: str, hint: str
+    ) -> "ProcessedFile":
+        """Сохраняет бинарный/офисный файл в approved_directory/_tg_files/
+        и отдаёт промпт с путём, чтобы Claude прочёл его сам своим Read tool
+        (или скриптом). Используется для PDF и офисных форматов."""
+        # Импортируем здесь, чтобы избежать циклов
+        import shutil as _sh
+
+        target_dir = Path(self.config.approved_directory) / "_tg_files"
+        target_dir.mkdir(parents=True, exist_ok=True)
+        target = target_dir / file_path.name
+        _sh.copy2(file_path, target)
+
+        prompt = (
+            f"{context}\n\n"
+            f"**File:** `{file_path.name}` (сохранён: `{target}`)\n\n"
+            f"{hint}"
+        )
+        return ProcessedFile(
+            type=file_path.suffix.lstrip(".").lower(),
+            prompt=prompt,
+            metadata={
+                "file_name": file_path.name,
+                "saved_path": str(target),
+                "size": file_path.stat().st_size,
+            },
+        )
 
     async def _process_archive(self, archive_path: Path, context: str) -> ProcessedFile:
         """Extract and analyze archive contents"""

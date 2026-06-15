@@ -384,11 +384,17 @@ async def handle_text_message(
                         tc_input = tc.get("input", {})
                         _fp = tc_input.get("file_path", "")
                         try:
+                            from ..utils.image_extractor import (
+                                is_under_allowed_roots,
+                            )
+
                             _p = _Path(_fp).resolve()
                             # только внутри разрешённой папки бота
-                            _p.relative_to(
-                                settings.approved_directory.resolve()
-                            )
+                            # (junction-цели C:\projects\X -> C:\X разрешены)
+                            if not is_under_allowed_roots(
+                                _p, settings.approved_directory
+                            ):
+                                raise ValueError("outside approved roots")
                             if (
                                 _p.is_file()
                                 and _p.stat().st_size <= 50 * 1024 * 1024
@@ -803,17 +809,62 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                 prompt = f"{caption}\n\n**File:** `{document.file_name}`\n\n```\n{content}\n```"
 
             except UnicodeDecodeError:
-                await progress_msg.edit_text(
-                    "❌ <b>File Format Not Supported</b>\n\n"
-                    "File must be text-based and UTF-8 encoded.\n\n"
-                    "<b>Supported formats:</b>\n"
-                    "• Source code files (.py, .js, .ts, etc.)\n"
-                    "• Text files (.txt, .md)\n"
-                    "• Configuration files (.json, .yaml, .toml)\n"
-                    "• Documentation files",
-                    parse_mode="HTML",
+                # Бинарный файл. Если это картинка (по mime_type или расширению) —
+                # сохраняем её в _tg_images, как делает фото-хендлер, и строим
+                # prompt в том же формате. Это нужно для случая, когда юзер шлёт
+                # JPG/PNG/WEBP/GIF *как файл* (Document, без Telegram-сжатия),
+                # а не как Photo. Раньше падало в UnicodeDecodeError и отказывало.
+                name = (document.file_name or "").lower()
+                mime = (document.mime_type or "").lower()
+                is_image = mime.startswith("image/") or name.endswith(
+                    (".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp")
                 )
-                return
+                if is_image:
+                    import time as _t
+                    _settings_ = context.bot_data["settings"]
+                    _dir = _settings_.approved_directory / "_tg_images"
+                    _dir.mkdir(parents=True, exist_ok=True)
+                    ext = ".jpg"
+                    if name.endswith(".png"):
+                        ext = ".png"
+                    elif name.endswith(".webp"):
+                        ext = ".webp"
+                    elif name.endswith(".gif"):
+                        ext = ".gif"
+                    elif name.endswith(".bmp"):
+                        ext = ".bmp"
+                    _ip = _dir / ("img_" + str(int(_t.time() * 1000)) + ext)
+                    _ip.write_bytes(bytes(file_bytes))
+                    caption = update.message.caption or ""
+                    prompt = (
+                        "I'm sharing an image with you (sent as document/file, "
+                        "not compressed photo). Please analyze it and help me with:\n\n"
+                        "1. Identifying what application or website this is from\n"
+                        "2. Understanding the UI elements and their purpose\n"
+                        "3. Any issues or improvements you notice\n"
+                        "4. Answering any specific questions I have\n\n"
+                    )
+                    if caption:
+                        prompt += f"Specific request: {caption}\n\n"
+                    prompt += (
+                        f"An image was saved at: {_ip}. Use the Read tool to open "
+                        "that file and respond about the image (describe / analyze / "
+                        "help). Answer any question written in the caption."
+                    )
+                else:
+                    await progress_msg.edit_text(
+                        "❌ <b>File Format Not Supported</b>\n\n"
+                        "File must be text-based and UTF-8 encoded, or an image "
+                        "(JPG, PNG, GIF, WEBP, BMP).\n\n"
+                        "<b>Supported formats:</b>\n"
+                        "• Source code files (.py, .js, .ts, etc.)\n"
+                        "• Text files (.txt, .md)\n"
+                        "• Configuration files (.json, .yaml, .toml)\n"
+                        "• Documentation files\n"
+                        "• Images (JPG, PNG, GIF, WEBP, BMP)",
+                        parse_mode="HTML",
+                    )
+                    return
 
         # Delete progress message
         await progress_msg.delete()
