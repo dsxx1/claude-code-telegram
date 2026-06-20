@@ -18,6 +18,8 @@ from telegram import (
     InlineKeyboardButton,
     InlineKeyboardMarkup,
     InputMediaPhoto,
+    KeyboardButton,
+    ReplyKeyboardMarkup,
     Update,
 )
 from telegram.ext import (
@@ -41,6 +43,18 @@ from .utils.image_extractor import (
 )
 
 logger = structlog.get_logger()
+
+# Persistent reply keyboard buttons (agentic mode).
+# Caught by text handler before message is forwarded to Claude.
+BTN_STOP = "⏹ Стоп"  # ⏹ Стоп
+BTN_NEW = "\U0001f504 Новый"  # 🔄 Новый
+BTN_STATUS = "\U0001f4ca Статус"  # 📊 Статус
+
+MAIN_REPLY_KEYBOARD = ReplyKeyboardMarkup(
+    [[KeyboardButton(BTN_STOP), KeyboardButton(BTN_NEW), KeyboardButton(BTN_STATUS)]],
+    resize_keyboard=True,
+    is_persistent=True,
+)
 
 _MEDIA_TYPE_MAP = {
     "png": "image/png",
@@ -115,6 +129,47 @@ _TOOL_ICONS: Dict[str, str] = {
 def _tool_icon(name: str) -> str:
     """Return emoji for a tool, with a default wrench."""
     return _TOOL_ICONS.get(name, "\U0001f527")
+
+
+# Phase grouping for fancy progress rendering.
+# Each tool is bucketed into a "phase" (explore / edit / run / fetch / plan / agent),
+# and the progress message shows a compact per-phase summary instead of a flat list.
+_PHASE_BY_TOOL = {
+    "Read": "explore",
+    "Glob": "explore",
+    "Grep": "explore",
+    "LS": "explore",
+    "Edit": "edit",
+    "Write": "edit",
+    "MultiEdit": "edit",
+    "NotebookEdit": "edit",
+    "Bash": "run",
+    "WebFetch": "fetch",
+    "WebSearch": "fetch",
+    "Task": "agent",
+    "TaskOutput": "agent",
+    "TodoWrite": "plan",
+    "TodoRead": "plan",
+}
+
+# (icon, russian label, english label) per phase
+_PHASE_META = {
+    "explore": ("\U0001f50d", "Изучаю", "Exploring"),
+    "edit": ("✍️", "Редактирую", "Editing"),
+    "run": ("\U0001f4bb", "Запускаю", "Running"),
+    "fetch": ("\U0001f310", "Загружаю", "Fetching"),
+    "agent": ("\U0001f9e0", "Делегирую", "Delegating"),
+    "plan": ("\U0001f4dd", "Планирую", "Planning"),
+    "other": ("\U0001f527", "Работаю", "Working"),
+}
+
+# Spinner frames (cycled by elapsed-seconds modulo)
+_SPINNER = ["◜", "◝", "◞", "◟"]  # ◜ ◝ ◞ ◟
+
+
+def _phase_for(tool_name: str) -> str:
+    """Map a tool name to its phase bucket."""
+    return _PHASE_BY_TOOL.get(tool_name, "other")
 
 
 @dataclass
@@ -324,6 +379,8 @@ class MessageOrchestrator:
         handlers = [
             ("start", self.agentic_start),
             ("new", self.agentic_new),
+            ("stop", self.agentic_stop),
+            ("diff", self.agentic_diff),
             ("status", self.agentic_status),
             ("verbose", self.agentic_verbose),
             ("repo", self.agentic_repo),
@@ -460,6 +517,8 @@ class MessageOrchestrator:
             commands = [
                 BotCommand("start", "Start the bot"),
                 BotCommand("new", "Start a fresh session"),
+                BotCommand("stop", "Interrupt current task"),
+                BotCommand("diff", "Show git changes in current dir"),
                 BotCommand("status", "Show session status"),
                 BotCommand("verbose", "Set output verbosity (0/1/2)"),
                 BotCommand("repo", "List repos / switch workspace"),
@@ -543,9 +602,10 @@ class MessageOrchestrator:
             f"Hi {safe_name}! I'm your AI coding assistant.\n"
             f"Just tell me what you need — I can read, write, and run code.\n\n"
             f"Working in: {dir_display}\n"
-            f"Commands: /new (reset) · /status"
+            f"Commands: /new (reset) · /stop · /status"
             f"{sync_line}",
             parse_mode="HTML",
+            reply_markup=MAIN_REPLY_KEYBOARD,
         )
 
     async def agentic_new(
@@ -556,7 +616,10 @@ class MessageOrchestrator:
         context.user_data["session_started"] = True
         context.user_data["force_new_session"] = True
 
-        await update.message.reply_text("Session reset. What's next?")
+        await update.message.reply_text(
+            "Session reset. What's next?",
+            reply_markup=MAIN_REPLY_KEYBOARD,
+        )
 
     async def agentic_status(
         self, update: Update, context: ContextTypes.DEFAULT_TYPE
@@ -634,33 +697,85 @@ class MessageOrchestrator:
         verbose_level: int,
         start_time: float,
     ) -> str:
-        """Build the progress message text based on activity so far."""
-        if not activity_log:
-            return "Working..."
+        """Phase-grouped progress card.
 
+        Groups tool calls by phase (explore/edit/run/fetch/plan/agent) and
+        renders a compact summary instead of a flat scrolling list:
+
+            ◜ 14с
+
+            🔍 Изучаю · 3 файла   (Read, Glob)
+            ✍️ Редактирую · 2 файла
+            ▶ 💻 Bash: pytest tests/
+
+            💭 «...последняя мысль Claude...»
+
+        The last action is always highlighted on its own line with ▶.
+        """
         elapsed = time.time() - start_time
-        lines: List[str] = [f"Working... ({elapsed:.0f}s)\n"]
+        spinner = _SPINNER[int(elapsed) % len(_SPINNER)]
 
-        for entry in activity_log[-15:]:  # Show last 15 entries max
+        if not activity_log:
+            return f"{spinner} Работаю… ({elapsed:.0f}с)"
+
+        # Aggregate by phase: counts of unique targets + last detail
+        phase_state: Dict[str, Dict[str, Any]] = {}
+        last_thought: Optional[str] = None
+        last_action: Optional[Dict[str, Any]] = None
+
+        for entry in activity_log:
             kind = entry.get("kind", "tool")
             if kind == "text":
-                # Claude's intermediate reasoning/commentary
-                snippet = entry.get("detail", "")
-                if verbose_level >= 2:
-                    lines.append(f"\U0001f4ac {snippet}")
-                else:
-                    # Level 1: one short line
-                    lines.append(f"\U0001f4ac {snippet[:80]}")
-            else:
-                # Tool call
-                icon = _tool_icon(entry["name"])
-                if verbose_level >= 2 and entry.get("detail"):
-                    lines.append(f"{icon} {entry['name']}: {entry['detail']}")
-                else:
-                    lines.append(f"{icon} {entry['name']}")
+                last_thought = entry.get("detail", "")
+                continue
 
-        if len(activity_log) > 15:
-            lines.insert(1, f"... ({len(activity_log) - 15} earlier entries)\n")
+            name = entry.get("name", "")
+            detail = entry.get("detail", "") or ""
+            phase = _phase_for(name)
+            state = phase_state.setdefault(
+                phase, {"count": 0, "targets": set(), "tools": set()}
+            )
+            state["count"] += 1
+            if detail:
+                state["targets"].add(detail)
+            state["tools"].add(name)
+            last_action = {"name": name, "detail": detail, "phase": phase}
+
+        lines: List[str] = [f"{spinner} <b>{elapsed:.0f}с</b>"]
+
+        # Phase summaries
+        phase_order = ["plan", "explore", "fetch", "agent", "edit", "run", "other"]
+        for phase in phase_order:
+            if phase not in phase_state:
+                continue
+            state = phase_state[phase]
+            icon, ru_label, _ = _PHASE_META[phase]
+            count = state["count"]
+            noun = "действие" if count == 1 else (
+                "действия" if 2 <= count <= 4 else "действий"
+            )
+            tools_str = ", ".join(sorted(state["tools"]))
+            line = f"{icon} {ru_label} · {count} {noun}"
+            if verbose_level >= 2 and tools_str:
+                line += f"  <i>({escape_html(tools_str)})</i>"
+            lines.append(line)
+
+        # Highlighted current action (always shown if any)
+        if last_action:
+            la_icon = _tool_icon(last_action["name"])
+            head = f"▶ {la_icon} <b>{escape_html(last_action['name'])}</b>"
+            if last_action["detail"]:
+                head += f": <code>{escape_html(last_action['detail'])}</code>"
+            lines.append("")
+            lines.append(head)
+
+        # Last reasoning snippet (verbose >= 1)
+        if last_thought and verbose_level >= 1:
+            snippet = last_thought.strip()
+            if len(snippet) > 140:
+                snippet = snippet[:137] + "…"
+            lines.append("")
+            lines.append(f"\U0001f4ad <i>{escape_html(snippet)}</i>")
 
         return "\n".join(lines)
 
@@ -864,7 +979,9 @@ class MessageOrchestrator:
                     )
                     try:
                         await progress_msg.edit_text(
-                            new_text, reply_markup=reply_markup
+                            new_text,
+                            reply_markup=reply_markup,
+                            parse_mode="HTML",
                         )
                     except Exception:
                         pass
@@ -966,6 +1083,18 @@ class MessageOrchestrator:
         """Direct Claude passthrough. Simple progress. No suggestions."""
         user_id = update.effective_user.id
         message_text = update.message.text
+
+        # Persistent reply-keyboard quick actions — intercept BEFORE Claude
+        # so the buttons don't get forwarded as prompts.
+        if message_text == BTN_STOP:
+            await self.agentic_stop(update, context)
+            return
+        if message_text == BTN_NEW:
+            await self.agentic_new(update, context)
+            return
+        if message_text == BTN_STATUS:
+            await self.agentic_status(update, context)
+            return
 
         logger.info(
             "Agentic text message",
@@ -1718,6 +1847,26 @@ class MessageOrchestrator:
             reply_markup=reply_markup,
         )
 
+    async def _interrupt_user_request(self, user_id: int) -> str:
+        """Interrupt a running Claude request for given user.
+
+        Returns one of: "interrupted", "already_stopping", "none".
+        Safe to call from any handler (command, callback, text).
+        """
+        active = self._active_requests.get(user_id)
+        if not active:
+            return "none"
+        if active.interrupted:
+            return "already_stopping"
+
+        active.interrupt_event.set()
+        active.interrupted = True
+        try:
+            await active.progress_msg.edit_text("Stopping...", reply_markup=None)
+        except Exception:
+            pass
+        return "interrupted"
+
     async def _handle_stop_callback(
         self, update: Update, context: ContextTypes.DEFAULT_TYPE
     ) -> None:
@@ -1732,22 +1881,96 @@ class MessageOrchestrator:
             )
             return
 
-        active = self._active_requests.get(target_user_id)
-        if not active:
+        result = await self._interrupt_user_request(target_user_id)
+        if result == "none":
             await query.answer("Already completed.", show_alert=False)
-            return
-        if active.interrupted:
+        elif result == "already_stopping":
             await query.answer("Already stopping...", show_alert=False)
+        else:
+            await query.answer("Stopping...", show_alert=False)
+
+    async def agentic_stop(
+        self, update: Update, context: ContextTypes.DEFAULT_TYPE
+    ) -> None:
+        """/stop command and ⏹ Стоп reply-keyboard button.
+
+        Interrupts the current Claude request (if any). Session is kept.
+        """
+        user_id = update.effective_user.id
+        result = await self._interrupt_user_request(user_id)
+        if result == "none":
+            text = "Нет активной задачи."
+        elif result == "already_stopping":
+            text = "Уже останавливаюсь…"
+        else:
+            text = "⏹ Прерываю текущую задачу."
+        await update.message.reply_text(text, reply_markup=MAIN_REPLY_KEYBOARD)
+
+    async def agentic_diff(
+        self, update: Update, context: ContextTypes.DEFAULT_TYPE
+    ) -> None:
+        """/diff command — show git status + diff stat for current working dir.
+
+        Helps the user quickly see what files Claude changed during the
+        current session, without leaving Telegram.
+        """
+        current_dir = context.user_data.get(
+            "current_directory", self.settings.approved_directory
+        )
+        current_path = Path(current_dir)
+
+        if not (current_path / ".git").is_dir():
+            await update.message.reply_text(
+                f"<code>{escape_html(str(current_path))}</code> — не git-репозиторий.",
+                parse_mode="HTML",
+                reply_markup=MAIN_REPLY_KEYBOARD,
+            )
             return
 
-        active.interrupt_event.set()
-        active.interrupted = True
-        await query.answer("Stopping...", show_alert=False)
+        async def _git(args: List[str]) -> str:
+            proc = await asyncio.create_subprocess_exec(
+                "git",
+                *args,
+                cwd=str(current_path),
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            out, _err = await proc.communicate()
+            return out.decode("utf-8", errors="replace")
 
         try:
-            await active.progress_msg.edit_text("Stopping...", reply_markup=None)
-        except Exception:
-            pass
+            status_out = (await _git(["status", "--short"])).strip()
+            stat_out = (await _git(["diff", "--stat", "HEAD"])).strip()
+        except Exception as exc:
+            await update.message.reply_text(
+                f"git failed: <code>{escape_html(str(exc))}</code>",
+                parse_mode="HTML",
+                reply_markup=MAIN_REPLY_KEYBOARD,
+            )
+            return
+
+        if not status_out and not stat_out:
+            await update.message.reply_text(
+                "✅ Чистый репозиторий — никаких изменений.",
+                reply_markup=MAIN_REPLY_KEYBOARD,
+            )
+            return
+
+        parts: List[str] = [
+            f"📂 <code>{escape_html(str(current_path))}</code>",
+        ]
+        if status_out:
+            parts.append("\n<b>📋 git status</b>")
+            parts.append(f"<pre>{escape_html(status_out[:1500])}</pre>")
+        if stat_out:
+            parts.append("\n<b>📊 git diff --stat HEAD</b>")
+            parts.append(f"<pre>{escape_html(stat_out[:1500])}</pre>")
+
+        await update.message.reply_text(
+            "\n".join(parts),
+            parse_mode="HTML",
+            reply_markup=MAIN_REPLY_KEYBOARD,
+        )
 
     async def _agentic_callback(
         self, update: Update, context: ContextTypes.DEFAULT_TYPE
