@@ -781,6 +781,11 @@ class MessageOrchestrator:
 
                         tc_input = tc.get("input", {})
                         _fp = tc_input.get("file_path", "")
+                        logger.info(
+                            "send_file_to_user: intercepted",
+                            tool_name=tc_name,
+                            file_path=_fp,
+                        )
                         try:
                             _p = _Path(_fp).resolve()
                             _p.relative_to(approved_directory.resolve())
@@ -795,9 +800,21 @@ class MessageOrchestrator:
                                         original_reference=_fp,
                                     )
                                 )
-                        except Exception:
+                                logger.info(
+                                    "send_file_to_user: queued",
+                                    path=str(_p),
+                                    size=_p.stat().st_size,
+                                )
+                            else:
+                                logger.warning(
+                                    "send_file_to_user: not a file or too large",
+                                    path=str(_p),
+                                )
+                        except Exception as _e:
                             logger.warning(
-                                "send_file_to_user: rejected path", path=_fp
+                                "send_file_to_user: rejected path",
+                                path=_fp,
+                                error=str(_e),
                             )
 
             # Capture tool calls

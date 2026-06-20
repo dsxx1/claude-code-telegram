@@ -42,6 +42,33 @@ class ImageAttachment:
     original_reference: str
 
 
+def allowed_roots(approved_directory: Path) -> list:
+    """Approved directory plus targets of junction links directly inside it.
+
+    The approved directory may consist of junction links
+    (C:\\projects\\<proj> -> C:\\<proj>); Path.resolve() unwraps them, so a
+    file saved through a junction path resolves outside the approved
+    directory.  Junction targets therefore count as allowed roots too.
+    """
+    roots = [approved_directory.resolve()]
+    try:
+        roots += [c.resolve() for c in approved_directory.iterdir() if c.is_dir()]
+    except OSError:
+        pass
+    return roots
+
+
+def is_under_allowed_roots(resolved: Path, approved_directory: Path) -> bool:
+    """True if *resolved* lies under the approved directory or a junction target."""
+    for root in allowed_roots(approved_directory):
+        try:
+            resolved.relative_to(root)
+            return True
+        except ValueError:
+            continue
+    return False
+
+
 def validate_image_path(
     file_path: str,
     approved_directory: Path,
@@ -59,10 +86,8 @@ def validate_image_path(
 
         resolved = path.resolve()
 
-        # Security: must be within approved directory
-        try:
-            resolved.relative_to(approved_directory.resolve())
-        except ValueError:
+        # Security: must be within approved directory (junction targets allowed)
+        if not is_under_allowed_roots(resolved, approved_directory):
             logger.debug(
                 "MCP image path outside approved directory",
                 path=str(resolved),

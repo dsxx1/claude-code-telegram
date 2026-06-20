@@ -40,26 +40,11 @@ async def security_middleware(
         # Continue without validation (log error but don't block)
         return await handler(event, data)
 
-    # In agentic mode, user text is a prompt to Claude — not a command.
-    # Skip input validation so natural conversation (backticks, paths, etc.) works.
-    settings = data.get("settings")
-    agentic_mode = getattr(settings, "agentic_mode", False) if settings else False
-
-    # Validate text content if present (classic mode only)
+    # Text validation отключена: бот однопользовательский, доверенный (ALLOWED_USER_ID).
+    # Старые паттерны давали ложные срабатывания на обычных сообщениях с путями
+    # (`~/.claude/...`), упоминаниях файлов кода и обратных кавычках. Файловые
+    # проверки ниже (MIME, размер) сохраняем — это разумно даже для своего юзера.
     message = event.effective_message
-    if message and message.text and not agentic_mode:
-        is_safe, violation_type = await validate_message_content(
-            message.text, security_validator, user_id, audit_logger
-        )
-        if not is_safe:
-            await message.reply_text(
-                f"🛡️ <b>Security Alert</b>\n\n"
-                f"Your message contains potentially dangerous content and has been blocked.\n"
-                f"Violation: {escape_html(violation_type)}\n\n"
-                "If you believe this is an error, please contact the administrator.",
-                parse_mode="HTML",
-            )
-            return  # Block processing
 
     # Validate file uploads if present
     if message and message.document:

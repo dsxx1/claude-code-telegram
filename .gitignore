@@ -147,3 +147,15 @@ sessions/
 backups/
 uploads/
 config/mcp.json
+# Local machine infra (home PC) - never commit
+bin/
+logs/
+*.vbs
+watchdog*.ps1
+watchdog_off.flag
+run_bot*.bat
+stop_bot.bat
+login_claude.bat
+restart_delayed.ps1
+config/gdrive_client.json
+config/gdrive_token.json

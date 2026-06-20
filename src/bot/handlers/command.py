@@ -1,6 +1,5 @@
 """Command handlers for bot operations."""
 
-import os
 import signal
 from datetime import datetime, timezone
 from pathlib import Path
@@ -1393,8 +1392,10 @@ async def restart_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     logger.info("Restart requested via /restart command", user_id=user_id)
 
     # SIGTERM triggers the existing graceful-shutdown handler in main.py;
-    # systemd Restart=always will bring the process back up.
-    os.kill(os.getpid(), signal.SIGTERM)
+    # the run_bot.bat restart loop (or systemd Restart=always) brings the
+    # process back up.  raise_signal (not os.kill) so the CRT handler runs
+    # on Windows instead of TerminateProcess.
+    signal.raise_signal(signal.SIGTERM)
 
 
 def _format_file_size(size: int) -> str:
