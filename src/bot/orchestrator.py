@@ -172,6 +172,35 @@ def _phase_for(tool_name: str) -> str:
     return _PHASE_BY_TOOL.get(tool_name, "other")
 
 
+def _format_response_footer(
+    cost: float,
+    duration_ms: int,
+    num_tools: int,
+    num_turns: int,
+) -> str:
+    """Compact one-line footer with cost, time, tools, turns.
+
+    Tasks longer than 30s get a 🔔 prefix so the user knows it was a
+    long-running task that may deserve attention.
+    """
+    secs = duration_ms / 1000.0
+    if secs >= 60:
+        time_str = f"{int(secs // 60)}м {int(secs % 60)}с"
+    else:
+        time_str = f"{secs:.0f}с"
+
+    bell = "🔔 " if secs >= 30 else ""
+    parts = [
+        f"⏱ {time_str}",
+        f"💰 ${cost:.4f}",
+    ]
+    if num_tools:
+        parts.append(f"🔧 {num_tools}")
+    if num_turns and num_turns > 1:
+        parts.append(f"↻ {num_turns}")
+    return f"\n\n<i>{bell}" + " · ".join(parts) + "</i>"
+
+
 @dataclass
 class ActiveRequest:
     """Tracks an in-flight Claude request so it can be interrupted."""
@@ -381,6 +410,7 @@ class MessageOrchestrator:
             ("new", self.agentic_new),
             ("stop", self.agentic_stop),
             ("diff", self.agentic_diff),
+            ("undo", self.agentic_undo),
             ("status", self.agentic_status),
             ("verbose", self.agentic_verbose),
             ("repo", self.agentic_repo),
@@ -400,6 +430,15 @@ class MessageOrchestrator:
             MessageHandler(
                 filters.TEXT & ~filters.COMMAND,
                 self._inject_deps(self.agentic_text),
+            ),
+            group=10,
+        )
+
+        # Edited text message -> interrupt + retry as new prompt
+        app.add_handler(
+            MessageHandler(
+                filters.UpdateType.EDITED_MESSAGE & filters.TEXT & ~filters.COMMAND,
+                self._inject_deps(self.agentic_edited_text),
             ),
             group=10,
         )
@@ -519,6 +558,7 @@ class MessageOrchestrator:
                 BotCommand("new", "Start a fresh session"),
                 BotCommand("stop", "Interrupt current task"),
                 BotCommand("diff", "Show git changes in current dir"),
+                BotCommand("undo", "Stash local changes (git stash)"),
                 BotCommand("status", "Show session status"),
                 BotCommand("verbose", "Set output verbosity (0/1/2)"),
                 BotCommand("repo", "List repos / switch workspace"),
@@ -1233,6 +1273,27 @@ class MessageOrchestrator:
 
             formatted_messages = formatter.format_claude_response(response_content)
 
+            # Cost / duration footer on the last message (HTML mode only).
+            # Non-HTML formatters get a plain-text fallback.
+            if formatted_messages and not claude_response.interrupted:
+                footer = _format_response_footer(
+                    cost=getattr(claude_response, "cost", 0.0) or 0.0,
+                    duration_ms=getattr(claude_response, "duration_ms", 0) or 0,
+                    num_tools=len(getattr(claude_response, "tools_used", []) or []),
+                    num_turns=getattr(claude_response, "num_turns", 0) or 0,
+                )
+                last_msg = formatted_messages[-1]
+                if (last_msg.parse_mode or "").upper() == "HTML":
+                    last_msg.text = (last_msg.text or "") + footer
+                else:
+                    # Plain footer for Markdown / no parse_mode
+                    plain = (
+                        footer.replace("<i>", "")
+                        .replace("</i>", "")
+                        .replace("&amp;", "&")
+                    )
+                    last_msg.text = (last_msg.text or "") + plain
+
         except Exception as e:
             success = False
             logger.error("Claude integration failed", error=str(e), user_id=user_id)
@@ -1905,6 +1966,130 @@ class MessageOrchestrator:
         else:
             text = "⏹ Прерываю текущую задачу."
         await update.message.reply_text(text, reply_markup=MAIN_REPLY_KEYBOARD)
+
+    async def agentic_edited_text(
+        self, update: Update, context: ContextTypes.DEFAULT_TYPE
+    ) -> None:
+        """User edited their last text message → interrupt + retry as new prompt.
+
+        Telegram emits an edited_message update when the user edits their
+        own message. We treat that as "redo this request with the updated
+        wording": cancel any in-flight Claude call, post a one-line
+        confirmation, then invoke the regular agentic_text pipeline with
+        a proxy Update so all the existing logic (progress, footer,
+        keyboard) works unchanged.
+        """
+        if not update.edited_message or not update.edited_message.text:
+            return
+
+        user_id = update.effective_user.id
+        new_text = update.edited_message.text
+
+        # Cancel anything in flight for this user
+        await self._interrupt_user_request(user_id)
+
+        # Inform the user we accepted the edit
+        try:
+            preview = new_text[:120]
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text=(
+                    f"✏️ Перезапускаю с правкой:\n"
+                    f"<i>{escape_html(preview)}</i>"
+                ),
+                parse_mode="HTML",
+                reply_to_message_id=update.edited_message.message_id,
+            )
+        except Exception:
+            pass
+
+        # Build a thin proxy so agentic_text sees edited_message as .message
+        class _EditedUpdateProxy:
+            def __init__(self, base: Update) -> None:
+                self._base = base
+
+            @property
+            def message(self):  # type: ignore[override]
+                return self._base.edited_message
+
+            @property
+            def effective_message(self):  # type: ignore[override]
+                return self._base.edited_message
+
+            @property
+            def effective_user(self):  # type: ignore[override]
+                return self._base.effective_user
+
+            @property
+            def effective_chat(self):  # type: ignore[override]
+                return self._base.effective_chat
+
+            @property
+            def callback_query(self):  # type: ignore[override]
+                return None
+
+            def __getattr__(self, name):
+                return getattr(self._base, name)
+
+        await self.agentic_text(_EditedUpdateProxy(update), context)
+
+    async def agentic_undo(
+        self, update: Update, context: ContextTypes.DEFAULT_TYPE
+    ) -> None:
+        """/undo — git stash any uncommitted changes in the current dir.
+
+        Quick safety net: if Claude wrote something you don't like, undo
+        rolls the working tree back to HEAD. Untracked files are stashed
+        too (-u). Recover with `git stash pop` in the repo.
+        """
+        current_dir = context.user_data.get(
+            "current_directory", self.settings.approved_directory
+        )
+        current_path = Path(current_dir)
+
+        if not (current_path / ".git").is_dir():
+            await update.message.reply_text(
+                f"<code>{escape_html(str(current_path))}</code> — не git-репозиторий.",
+                parse_mode="HTML",
+                reply_markup=MAIN_REPLY_KEYBOARD,
+            )
+            return
+
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "git",
+                "stash",
+                "push",
+                "-u",
+                "-m",
+                "telegram-bot:/undo",
+                cwd=str(current_path),
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            out, err = await proc.communicate()
+            out_str = (out + err).decode("utf-8", errors="replace").strip()
+        except Exception as exc:
+            await update.message.reply_text(
+                f"git stash failed: <code>{escape_html(str(exc))}</code>",
+                parse_mode="HTML",
+                reply_markup=MAIN_REPLY_KEYBOARD,
+            )
+            return
+
+        if "No local changes to save" in out_str:
+            text = "Нечего откатывать — рабочее дерево чистое."
+        else:
+            text = (
+                "↩️ Откатил все правки в текущей папке (включая новые файлы).\n"
+                "Восстановить: <code>git stash pop</code> в репо."
+            )
+
+        await update.message.reply_text(
+            text,
+            parse_mode="HTML",
+            reply_markup=MAIN_REPLY_KEYBOARD,
+        )
 
     async def agentic_diff(
         self, update: Update, context: ContextTypes.DEFAULT_TYPE
