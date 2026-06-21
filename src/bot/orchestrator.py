@@ -44,17 +44,19 @@ from .utils.image_extractor import (
 
 logger = structlog.get_logger()
 
-# Persistent reply keyboard buttons (agentic mode).
-# Caught by text handler before message is forwarded to Claude.
-BTN_STOP = "⏹ Стоп"  # ⏹ Стоп
-BTN_NEW = "\U0001f504 Новый"  # 🔄 Новый
-BTN_STATUS = "\U0001f4ca Статус"  # 📊 Статус
-
-MAIN_REPLY_KEYBOARD = ReplyKeyboardMarkup(
-    [[KeyboardButton(BTN_STOP), KeyboardButton(BTN_NEW), KeyboardButton(BTN_STATUS)]],
-    resize_keyboard=True,
-    is_persistent=True,
+# Persistent reply-keyboard shared between classic and agentic modes.
+# Defined once in src/bot/keyboards.py so both register paths can import it.
+from .keyboards import (  # noqa: E402  (intentional after logger init)
+    BTN_NEW,
+    BTN_STATUS,
+    BTN_STOP,
+    MAIN_REPLY_KEYBOARD,
 )
+
+# Key under which the cross-mode active-request registry lives in bot_data.
+# We previously kept it as self._active_requests, but classic handlers don't
+# have access to the orchestrator instance, so we promote it to bot_data.
+ACTIVE_REQUESTS_KEY = "active_requests"
 
 _MEDIA_TYPE_MAP = {
     "png": "image/png",
@@ -412,6 +414,8 @@ class MessageOrchestrator:
             ("diff", self.agentic_diff),
             ("undo", self.agentic_undo),
             ("status", self.agentic_status),
+            ("memory", self.agentic_memory),
+            ("remember", self.agentic_remember),
             ("verbose", self.agentic_verbose),
             ("repo", self.agentic_repo),
             ("restart", command.restart_command),
@@ -560,6 +564,8 @@ class MessageOrchestrator:
                 BotCommand("diff", "Show git changes in current dir"),
                 BotCommand("undo", "Stash local changes (git stash)"),
                 BotCommand("status", "Show session status"),
+                BotCommand("memory", "Show persistent memory bank"),
+                BotCommand("remember", "Save a note to memory: /remember ..."),
                 BotCommand("verbose", "Set output verbosity (0/1/2)"),
                 BotCommand("repo", "List repos / switch workspace"),
                 BotCommand("restart", "Restart the bot"),
@@ -687,6 +693,58 @@ class MessageOrchestrator:
 
         await update.message.reply_text(
             f"📂 {dir_display} · Session: {session_status}{cost_str}"
+        )
+
+    async def agentic_memory(
+        self, update: Update, context: ContextTypes.DEFAULT_TYPE
+    ) -> None:
+        """Show the persistent memory bank: /memory."""
+        from ..claude.memory_bank import (
+            ensure_global_memory,
+            global_memory_file,
+            read_all_memory,
+        )
+
+        approved = self.settings.approved_directory
+        working = context.user_data.get("current_directory", approved)
+        ensure_global_memory(approved)
+        dump = read_all_memory(approved, Path(working))
+        rel = global_memory_file(approved)
+        if not dump.strip():
+            dump = "(пусто)"
+        header = (
+            "🧠 <b>Memory Bank</b>\n"
+            f"<code>{escape_html(str(rel))}</code>\n\n"
+            "Добавить заметку: <code>/remember текст</code>\n"
+            "Claude дописывает важное сам.\n"
+            "────────────\n"
+        )
+        body = escape_html(dump)
+        if len(body) > 3500:
+            body = body[:3500] + "\n…(обрезано, см. файл)…"
+        await update.message.reply_text(header + body, parse_mode="HTML")
+
+    async def agentic_remember(
+        self, update: Update, context: ContextTypes.DEFAULT_TYPE
+    ) -> None:
+        """Append a note to the global memory bank: /remember <text>."""
+        from ..claude.memory_bank import append_global_note
+
+        text = (update.message.text or "").split(maxsplit=1)
+        note = text[1].strip() if len(text) > 1 else ""
+        if not note:
+            await update.message.reply_text(
+                "Что запомнить? Пример: <code>/remember отвечай кратко по-русски</code>",
+                parse_mode="HTML",
+            )
+            return
+        try:
+            append_global_note(self.settings.approved_directory, note)
+        except Exception as exc:
+            await update.message.reply_text(f"⚠️ Не смог записать: {exc}")
+            return
+        await update.message.reply_text(
+            "✅ Запомнил. Учту в этой и будущих сессиях."
         )
 
     def _get_verbose_level(self, context: ContextTypes.DEFAULT_TYPE) -> int:

@@ -343,6 +343,24 @@ class ClaudeSDKManager:
                     path=str(claude_md_path),
                 )
 
+            # Persistent "memory bank": global notes (under APPROVED_DIRECTORY)
+            # plus optional per-project memory-bank/. Survives sessions/restarts.
+            try:
+                from .memory_bank import ensure_global_memory, load_memory_context
+
+                ensure_global_memory(self.config.approved_directory)
+                memory_block = load_memory_context(
+                    self.config.approved_directory, Path(working_directory)
+                )
+                if memory_block:
+                    base_prompt += "\n\n" + memory_block
+                    logger.info(
+                        "Loaded memory bank into system prompt",
+                        chars=len(memory_block),
+                    )
+            except Exception as exc:  # pragma: no cover - memory is best-effort
+                logger.warning("Failed to load memory bank", error=str(exc))
+
             # When DISABLE_TOOL_VALIDATION=true, pass None for allowed/disallowed
             # tools so the SDK does not restrict tool usage (e.g. MCP tools).
             if self.config.disable_tool_validation:
