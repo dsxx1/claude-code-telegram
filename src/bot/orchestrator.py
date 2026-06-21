@@ -179,8 +179,9 @@ def _format_response_footer(
     duration_ms: int,
     num_tools: int,
     num_turns: int,
+    context_tokens: int = 0,
 ) -> str:
-    """Compact one-line footer with cost, time, tools, turns.
+    """Compact one-line footer with cost, time, tools, turns, context fill.
 
     Tasks longer than 30s get a 🔔 prefix so the user knows it was a
     long-running task that may deserve attention.
@@ -200,7 +201,20 @@ def _format_response_footer(
         parts.append(f"🔧 {num_tools}")
     if num_turns and num_turns > 1:
         parts.append(f"↻ {num_turns}")
-    return f"\n\n<i>{bell}" + " · ".join(parts) + "</i>"
+
+    # Context-window fill indicator (200k window). Helps spot when a session
+    # has bloated — every further turn re-reads the whole context and burns
+    # the 5h limit faster, so a near-full bar is the cue to /new.
+    hint = ""
+    if context_tokens and context_tokens > 0:
+        window = 200_000
+        pct = min(int(round(context_tokens * 100 / window)), 100)
+        gauge = "🟢" if pct < 50 else "🟡" if pct < 80 else "🔴"
+        parts.append(f"{gauge} {context_tokens // 1000}k/200k ({pct}%)")
+        if pct >= 80:
+            hint = "\n⚠️ Контекст почти полон — /new сбросит и удешевит ответы."
+
+    return f"\n\n<i>{bell}" + " · ".join(parts) + "</i>" + hint
 
 
 @dataclass
@@ -1283,6 +1297,7 @@ class MessageOrchestrator:
                     duration_ms=getattr(claude_response, "duration_ms", 0) or 0,
                     num_tools=len(getattr(claude_response, "tools_used", []) or []),
                     num_turns=getattr(claude_response, "num_turns", 0) or 0,
+                    context_tokens=getattr(claude_response, "context_tokens", 0) or 0,
                 )
                 last_msg = formatted_messages[-1]
                 if (last_msg.parse_mode or "").upper() == "HTML":

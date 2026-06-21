@@ -6,17 +6,19 @@ handlers intercept these labels BEFORE forwarding to Claude so they don't
 leak as prompts.
 """
 
-from telegram import KeyboardButton, ReplyKeyboardMarkup
+from telegram import ReplyKeyboardRemove
 
-# Button labels (these texts must match exactly to be intercepted).
+# Button labels kept for backward compatibility: the text-interception logic
+# still recognises these strings if an old client sends them, but the
+# persistent keyboard itself is disabled — the actions live as slash commands
+# (/stop, /new, /status) in the bot's "/" menu instead.
 BTN_STOP = "⏹ Стоп"
 BTN_NEW = "\U0001f504 Новый"  # 🔄 Новый
 BTN_STATUS = "\U0001f4ca Статус"  # 📊 Статус
 
 QUICK_ACTION_BUTTONS = {BTN_STOP, BTN_NEW, BTN_STATUS}
 
-MAIN_REPLY_KEYBOARD = ReplyKeyboardMarkup(
-    [[KeyboardButton(BTN_STOP), KeyboardButton(BTN_NEW), KeyboardButton(BTN_STATUS)]],
-    resize_keyboard=True,
-    is_persistent=True,
-)
+# Previously a persistent ReplyKeyboardMarkup with Стоп/Новый/Статус buttons.
+# Replaced with ReplyKeyboardRemove so every message that used to attach the
+# keyboard now clears it — no bottom panel, commands stay in the "/" menu.
+MAIN_REPLY_KEYBOARD = ReplyKeyboardRemove()

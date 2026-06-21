@@ -3,6 +3,7 @@
 import argparse
 import asyncio
 import logging
+import os
 import signal
 import sys
 from pathlib import Path
@@ -380,6 +381,17 @@ async def main() -> None:
 
         config = load_config(config_file=args.config_file)
         features = FeatureFlags(config)
+
+        # Force ALL subagents (Task tool + multi-agent Workflow agents) onto a
+        # cheaper model regardless of the main model. The child `claude` process
+        # spawned by the SDK inherits this env var. Saves the 5h usage limit on
+        # heavy fan-outs. Configurable via CLAUDE_SUBAGENT_MODEL in .env.
+        if config.claude_subagent_model:
+            os.environ["CLAUDE_CODE_SUBAGENT_MODEL"] = config.claude_subagent_model
+            logger.info(
+                "Subagent model pinned",
+                subagent_model=config.claude_subagent_model,
+            )
 
         logger.info(
             "Configuration loaded",

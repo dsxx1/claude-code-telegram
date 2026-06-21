@@ -81,6 +81,15 @@ class Settings(BaseSettings):
     claude_model: Optional[str] = Field(
         None, description="Claude model to use (defaults to CLI default if unset)"
     )
+    claude_subagent_model: Optional[str] = Field(
+        "haiku",
+        description=(
+            "Model for ALL subagents (Task tool + Workflow agents). Exported as "
+            "CLAUDE_CODE_SUBAGENT_MODEL so it overrides the main model for "
+            "subagents only. Keeps heavy multi-agent fan-outs cheap. Set empty "
+            "to let subagents inherit the main model."
+        ),
+    )
     claude_max_turns: int = Field(
         DEFAULT_CLAUDE_MAX_TURNS, description="Max conversation turns"
     )

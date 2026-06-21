@@ -59,6 +59,9 @@ class ClaudeResponse:
     error_type: Optional[str] = None
     tools_used: List[Dict[str, Any]] = field(default_factory=list)
     interrupted: bool = False
+    # Approx. context-window fill after the last model call: input + cache_read
+    # + cache_creation tokens of the final assistant turn. 0 if unknown.
+    context_tokens: int = 0
 
 
 @dataclass
@@ -357,6 +360,10 @@ class ClaudeSDKManager:
                 # ~/.claude.json (patapim-browser и т.п.), которые висли на
                 # initialize → "Control request timeout".
                 strict_mcp_config=bool(self.config.enable_mcp),
+                # Поднимаем лимит буфера парсера потокового JSON с дефолтных
+                # 1 МБ до 20 МБ: крупные tool-результаты / чтение больших
+                # файлов давали "JSON message exceeded maximum buffer size".
+                max_buffer_size=20 * 1024 * 1024,
                 max_turns=self.config.claude_max_turns,
                 model=self.config.claude_model or None,
                 max_budget_usd=self.config.claude_max_cost_per_request,
@@ -633,6 +640,21 @@ class ClaudeSDKManager:
                 tools_summary = ", ".join(unique_tool_names) or "unknown"
                 content = TASK_COMPLETED_MSG.format(tools_summary=tools_summary)
 
+            # Approx. context-window fill = input side (new input + cache read +
+            # cache creation) of the LAST assistant turn. That's how many tokens
+            # were sent into the model, i.e. how full the context currently is.
+            context_tokens = 0
+            for _m in reversed(messages):
+                if isinstance(_m, AssistantMessage):
+                    _u = getattr(_m, "usage", None)
+                    if isinstance(_u, dict):
+                        context_tokens = (
+                            (_u.get("input_tokens") or 0)
+                            + (_u.get("cache_read_input_tokens") or 0)
+                            + (_u.get("cache_creation_input_tokens") or 0)
+                        )
+                        break
+
             return ClaudeResponse(
                 content=content,
                 session_id=final_session_id,
@@ -647,6 +669,7 @@ class ClaudeSDKManager:
                 ),
                 tools_used=tools_used,
                 interrupted=interrupted,
+                context_tokens=context_tokens,
             )
 
         except asyncio.TimeoutError:

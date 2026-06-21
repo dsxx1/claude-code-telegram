@@ -728,6 +728,10 @@ if __name__ == "__main__":
                 # ~/.claude.json (patapim-browser и т.п.), которые висли на
                 # initialize → "Control request timeout".
                 strict_mcp_config=bool(self.config.enable_mcp),
+                # Поднимаем лимит буфера парсера потокового JSON с дефолтных
+                # 1 МБ до 20 МБ: крупные tool-результаты / чтение больших
+                # файлов давали "JSON message exceeded maximum buffer size".
+                max_buffer_size=20 * 1024 * 1024,
                 max_turns=self.config.claude_max_turns,''',
     ),
     (
